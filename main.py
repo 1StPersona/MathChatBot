@@ -1,10 +1,19 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from sympy import symbols, Eq, solve, simplify, factor, expand, apart
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext
+from telegram.ext.filters import TEXT, PHOTO, COMMAND, VOICE
+import speech_recognition as sr
+import logging
 import cv2
 import pytesseract
 import re
-import speech_recognition as sr
+import os
+
+# Логирование
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Настройка Tesseract OCR
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -23,11 +32,13 @@ def clean_ocr_text(text):
 
 # Обработка математических выражений
 def evaluate_math_expression(expression):
+    from sympy import symbols, Eq, solve, simplify  # Повторный импорт для локальной видимости
     from sympy.parsing.sympy_parser import standard_transformations, implicit_multiplication_application, parse_expr
+
     transformations = (standard_transformations + (implicit_multiplication_application,))
     try:
         expression = clean_ocr_text(expression)
-        x, y, z = symbols('x y z')
+        x, y, z = symbols('x y z')  # Символы для математических уравнений
         if "=" in expression:
             lhs, rhs = expression.split("=")
             equation = Eq(parse_expr(lhs, transformations=transformations), parse_expr(rhs, transformations=transformations))
@@ -50,50 +61,76 @@ def process_image(image_path):
     except Exception as e:
         return f"Ошибка при обработке изображения: {e}"
 
-# Обработка голосовых команд
-def process_voice_command():
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Говорите, я слушаю...")
-        try:
-            audio = recognizer.listen(source, timeout=5)
-            voice_text = recognizer.recognize_google(audio, language="ru-RU")  # Распознавание на русском
-            print(f"Распознанная команда: {voice_text}")
-            return voice_text
-        except sr.UnknownValueError:
-            return "Не удалось распознать речь."
-        except sr.RequestError as e:
-            return f"Ошибка распознавания: {e}"
-        except sr.WaitTimeoutError:
-            return "Время ожидания истекло."
+# Команда /start
+async def start(update, context):
+    await update.message.reply_text(
+        "Привет! Я бот для обработки текста, изображений и голосовых команд. Напишите выражение, отправьте изображение или голосовое сообщение!"
+    )
 
-# Основной чат-бот
-def chatbot_ai():
-    print("Привет! Я бот на основе ИИ. Вы можете задавать вопросы, отправлять изображения или использовать голосовые команды.")
-    while True:
-        user_input = input("Выберите режим ('текст', 'изображение', 'голос', 'выход'): ").lower()
-        if user_input in ["выход", "quit", "exit"]:
-            print("Бот: Пока!")
-            break
+# Обработка текстовых сообщений
+async def handle_text(update, context):
+    user_text = update.message.text
+    response = evaluate_math_expression(user_text)  # Обработка выражения
+    await update.message.reply_text(response)
 
-        if user_input == "изображение":
-            image_path = input("Укажите путь к изображению: ")
-            response = process_image(image_path)
-            print(f"Бот: {response}")
-        elif user_input == "голос":
-            voice_command = process_voice_command()
-            if "ошибка" not in voice_command.lower():
-                response = evaluate_math_expression(voice_command)
-                print(f"Бот: {response}")
-            else:
-                print(f"Бот: {voice_command}")
-        elif user_input == "текст":
-            text_command = input("Введите текстовое выражение: ")
-            response = evaluate_math_expression(text_command)
-            print(f"Бот: {response}")
-        else:
-            print("Неизвестный режим. Пожалуйста, выберите 'текст', 'изображение' или 'голос'.")
+# Обработка изображений
+async def handle_image(update, context):
+    try:
+        # Получение файла изображения
+        photo = await update.message.photo[-1].get_file()
 
-# Запуск бота
+        # Задаём путь для сохранения
+        file_path = os.path.join(PROJECT_ROOT, "temp_image.jpg")
+        print(file_path)
+
+        # Скачиваем файл
+        await photo.download_to_file(file_path)
+
+        # Обрабатываем изображение
+        response = process_image(file_path)
+        await update.message.reply_text(response)
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при обработке изображения: {e}")
+
+
+async def handle_voice(update, context):
+    try:
+        # Получение голосового файла
+        voice = await update.message.voice.get_file()
+
+        # Сохранение голосового сообщения
+        file_path = os.path.join(PROJECT_ROOT, "voice.ogg")
+        await voice.download_to_file(file_path)
+
+        # Конвертация голосового файла в текст
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(file_path) as source:
+            audio = recognizer.record(source)
+            recognized_text = recognizer.recognize_google(audio, language="ru-RU")
+
+        await update.message.reply_text(f"Распознанный текст: {recognized_text}")
+    except sr.UnknownValueError:
+        await update.message.reply_text("Не удалось распознать речь.")
+    except sr.RequestError as e:
+        await update.message.reply_text(f"Ошибка распознавания: {e}")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при обработке голосового сообщения: {e}")
+
+# Основная функция
+def main():
+    TOKEN = "7794932761:AAE2-kAwzPxI1_huNW9j4kGOXXEP-qWAwjQ"  # Замените на ваш токен
+
+    # Инициализация приложения
+    application = Application.builder().token(TOKEN).build()
+
+    # Регистрация обработчиков
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(TEXT & ~COMMAND, handle_text))  # Для текстовых сообщений
+    application.add_handler(MessageHandler(PHOTO, handle_image))  # Для изображений
+    application.add_handler(MessageHandler(VOICE, handle_voice))
+
+    # Запуск бота
+    application.run_polling()
+
 if __name__ == "__main__":
-    chatbot_ai()
+    main()
