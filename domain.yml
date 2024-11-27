@@ -1,0 +1,41 @@
+version: "3.1"
+
+intents:
+  - greet
+  - goodbye
+  - affirm
+  - deny
+  - mood_great
+  - mood_unhappy
+  - bot_challenge
+  - ask_math
+
+actions:
+  - action_solve_math
+
+responses:
+  utter_greet:
+  - text: "Привет! Как я могу вам помочь?"
+
+  utter_cheer_up:
+  - text: "Вот кое-что, чтобы поднять настроение:"
+    image: "https://i.imgur.com/nGF1K8f.jpg"
+
+  utter_did_that_help:
+  - text: "Это вам помогло?"
+
+  utter_happy:
+  - text: "Отлично, продолжайте!"
+
+  utter_goodbye:
+  - text: "До свидания!"
+
+  utter_iamabot:
+  - text: "Я бот, созданный с помощью Rasa."
+
+  utter_solve_math:
+  - text: "Дайте мне уравнение, и я его решу!"
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true
